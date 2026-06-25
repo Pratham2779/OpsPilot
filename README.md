@@ -154,12 +154,6 @@ You: Restart the nginx service.
 
 ---
 
-## License
-
-MIT License
-
----
-
 ## Author
 
 **Prathamesh Arun Gurav**
