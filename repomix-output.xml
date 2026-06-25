@@ -1,0 +1,825 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+tools/
+  commandRiskClassifier.tool.js
+  search.tool.js
+  ssh.tool.js
+.gitignore
+agent.js
+Architecture.md
+constants.js
+index.js
+llm.js
+package.json
+README.md
+utils.js
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="package.json">
+{
+  "name": "opspilot",
+  "version": "1.0.0",
+  "description": "A secure AI-powered Linux operations agent built with LangGraph that performs reasoning, web search, SSH command execution, AI risk assessment, and human-in-the-loop authorization.",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "node ./index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Pratham2779/OpsPilot.git"
+  },
+  "author": "Prathamesh Arun Gurav",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Pratham2779/OpsPilot/issues"
+  },
+  "homepage": "https://github.com/Pratham2779/OpsPilot#readme",
+  "dependencies": {
+    "@langchain/core": "^1.2.1",
+    "@langchain/langgraph": "^1.4.6",
+    "@tavily/core": "^0.7.6",
+    "dotenv": "^17.4.2",
+    "openai": "^6.45.0",
+    "ssh2": "^1.17.0"
+  }
+}
+</file>
+
+<file path="README.md">
+# OpsPilot
+Autonomous Linux operations agent with AI reasoning, SSH execution, web search, and secure human-in-the-loop approval.
+</file>
+
+<file path="tools/commandRiskClassifier.tool.js">
+import { client } from "../llm.js";
+import { config } from "dotenv";
+config();
+
+
+const SYSTEM_PROMPT = `
+You are a Linux Command Risk Classifier.
+
+Classify exactly one shell command string by risk.
+
+Rules:
+- Do not answer questions, explain Linux, execute anything, suggest alternatives, or output Markdown/code fences.
+- Output exactly one single-line JSON object and nothing else.
+- Use only double quotes in JSON.
+- Use only true/false for booleans.
+- Do not invent or omit fields.
+- "risk" must be one of: "safe", "low", "medium", "high", "critical".
+
+Risk levels:
+- safe: read-only, no side effects.
+- low: creates or modifies ordinary user-owned files, usually easy to undo.
+- medium: installs/updates software, restarts services, or edits app-level configuration.
+- high: deletes files, removes packages, broadly changes permissions/ownership, kills processes, or changes important system settings.
+- critical: can permanently damage the OS, erase data irrecoverably, lock users out, corrupt disks, or make the system unbootable.
+
+Analyze the full command, including chaining, pipes, redirects, xargs, eval, sh -c, bash -c, command substitution, subshells, scripts, and external files.
+If multiple subcommands exist, use the highest risk and union of effects.
+If the command is unknown, obfuscated, encoded, base64-piped, heavily escaped, suspicious, or unclear, fail safe and prefer high or critical. 
+Set irreversible to true if data loss cannot be ruled out.
+
+Permission rule:
+- requiresPermission is false only for safe.
+- requiresPermission is true for low, medium, high, and critical.
+
+Effects:
+- readsFiles: reads file contents or metadata
+- writesFiles: modifies existing file contents
+- createsFiles: creates files or directories
+- deletesFiles: removes or destroys files or directories
+- modifiesPermissions: chmod, chown, setfacl, umask changes
+- changesSystemConfiguration: /etc, sysctl, firewall, boot config, kernel params, routing, or similar
+- installsPackages: installs packages or software
+- removesPackages: removes packages or software
+- startsServices: starts services
+- stopsServices: stops services
+- createsUsers: creates users or accounts
+- deletesUsers: deletes users or accounts
+- networkChanges: firewall, iptables, ufw, netplan, /etc/hosts, routing, or similar
+- requiresRoot: command needs root privileges or targets root-owned paths
+- irreversible: true if it can cause unrecoverable data loss or system damage
+
+Consistency:
+- If deletesFiles is true, risk cannot be safe or low.
+- If removesPackages is true, risk cannot be safe or low.
+- If modifiesPermissions is broad or system-wide, risk cannot be safe or low.
+- If changesSystemConfiguration is true, risk is at least medium.
+- If requiresRoot is true and the command changes the system, risk is usually high or critical.
+- risk and effects must agree.
+- Prefer the safer classification when uncertain, but never under-classify dangerous commands.
+
+Return exactly this JSON shape:
+{
+  "risk": "safe | low | medium | high | critical",
+  "requiresPermission": true,
+  "summary": "Short one-line summary.",
+  "reason": "Why this risk level was assigned.",
+  "effects": {
+    "readsFiles": false,
+    "writesFiles": false,
+    "deletesFiles": false,
+    "createsFiles": false,
+    "modifiesPermissions": false,
+    "changesSystemConfiguration": false,
+    "installsPackages": false,
+    "removesPackages": false,
+    "startsServices": false,
+    "stopsServices": false,
+    "createsUsers": false,
+    "deletesUsers": false,
+    "networkChanges": false,
+    "requiresRoot": false,
+    "irreversible": false
+  }
+}
+`;
+
+
+async function commandRiskClassifier(command) {
+
+    try {
+
+        const response = await client.responses.create({
+            model: process.env.CLASSIFIER_LLM_MODEL_NAME,
+
+            input: [
+                {
+                    role: "system",
+                    content: SYSTEM_PROMPT
+                },
+                {
+                    role: "user",
+                    content: command
+                }
+            ]
+        });
+
+        return JSON.parse(response.output_text);
+
+    } catch (err) {
+
+        throw new Error(`Risk classification failed: ${err.message}`);
+
+    }
+
+}
+
+export {
+    commandRiskClassifier
+};
+</file>
+
+<file path="tools/search.tool.js">
+import { tavily } from "@tavily/core";
+import { config } from "dotenv";
+config();
+
+
+const client = tavily({ apiKey: process.env.TAVILY_API_KEY });
+
+
+
+function search(query,searchDepth) {
+
+    return client.search(query, {
+        searchDepth:searchDepth
+    });
+}
+
+
+export {
+    search
+};
+</file>
+
+<file path="tools/ssh.tool.js">
+import { Client } from "ssh2";
+import fs from 'fs';
+
+const conn=new Client();
+
+
+function connect(host, port, username, keyPath) {
+
+    return new Promise((resolve, reject) => {
+
+        conn.once("ready", () => {
+            resolve("Connected Successfully");
+        });
+
+        conn.once("error", (err) => {
+            reject(err);
+        });
+
+        const privateKey=fs.readFileSync(keyPath);
+
+        conn.connect({
+            host,
+            port,
+            username,
+            //password,
+            privateKey
+        });
+
+    });
+
+}
+
+
+function executeCMD(command) {
+
+    return new Promise((resolve, reject) => {
+
+        let stdout = "";
+        let stderr = "";
+
+        conn.exec(command, (err, stream) => {
+
+            if (err) {
+                return reject(err);
+            }
+
+            stream.on("data", (data) => {
+                stdout += data.toString();
+            });
+
+            stream.stderr.on("data", (data) => {
+                stderr += data.toString();
+            });
+
+            stream.on("close", () => {
+                resolve({
+                    stdout,
+                    stderr
+                });
+            });
+
+        });
+
+    });
+
+}
+
+function disconnect() {
+    return new Promise((resolve) => {
+        conn.once("close", () => {
+        
+            resolve();
+        });
+
+        conn.destroy();
+    });
+}
+
+export {
+    connect,
+    executeCMD,
+    disconnect
+};
+</file>
+
+<file path="agent.js">
+import { Annotation, StateGraph, START, END } from "@langchain/langgraph";
+import { client } from "./llm.js";
+import { search } from "./tools/search.tool.js";
+import { executeCMD } from "./tools/ssh.tool.js";
+import { commandRiskClassifier } from "./tools/commandRiskClassifier.tool.js";
+import { askHuman, truncateOutput } from "./utils.js";
+import { toolsSpec } from "./constants.js";
+
+const AgentState = Annotation.Root({
+    messages: Annotation({ reducer: (left, right) => left.concat(right), default: () => [] }),
+    loopCount: Annotation({ reducer: (left, right) => right, default: () => 0 })
+});
+
+const agentNode = async (state) => {
+    console.log(`\n--- [Reasoning Step #${state.loopCount + 1}] ---`);
+    
+    const response = await client.chat.completions.create({
+        model: process.env.AGENT_LLM_MODEL_NAME,
+        messages: state.messages,
+        tools: toolsSpec,
+        tool_choice: "auto",
+        reasoning_format: "hidden",
+        temperature: 0.6
+    });
+
+    return { 
+        messages: [response.choices[0].message], 
+        loopCount: state.loopCount + 1 
+    };
+};
+
+const executeToolsNode = async (state) => {
+    const lastMessage = state.messages[state.messages.length - 1];
+    const toolMessages = [];
+    let batchAborted = false;
+
+    for (const toolCall of lastMessage.tool_calls || []) {
+        const toolName = toolCall.function.name;
+        const args = JSON.parse(toolCall.function.arguments);
+
+        let payload = {
+            tool: toolName,
+            status: "pending",
+            message: "",
+            data: null
+        };
+
+        if (batchAborted) {
+            payload.status = "aborted";
+            payload.message = "Skipped because a previous action was blocked or failed.";
+            toolMessages.push({ role: "tool", tool_call_id: toolCall.id, name: toolName, content: JSON.stringify(payload) });
+            continue;
+        }
+
+        if (toolName === "search") {
+            console.log(`Agent searching for: "${args.query}"`);
+            const searchResults = await search(args.query, args.searchDepth || "basic");
+
+            payload.status = "success";
+            payload.message = "Web search completed.";
+            payload.data = searchResults;
+            
+        } else if (toolName === "executeCMD") {
+            console.log(`Agent requests: "${args.command}"`);
+            const evaluation = await commandRiskClassifier(args.command);
+            console.log(`Risk: ${evaluation.risk.toUpperCase()} | Reason: ${evaluation.reason}`);
+
+            let isApproved = true;
+            let humanFeedback = "Auto-approved (Safe Command).";
+            const needsPermission = evaluation.requiresPermission || ["medium", "high", "critical"].includes(evaluation.risk);
+
+            if (needsPermission) {
+                console.log(`ACTION REQUIRED: Human authorization needed.`);
+                const input = (await askHuman(`Allow execution? (y/n/provide feedback): `)).toLowerCase();
+
+                if (input === 'y' || input === 'yes') {
+                    isApproved = true;
+                    humanFeedback = "Approved by human.";
+                } else if (input === 'n' || input === 'no') {
+                    isApproved = false;
+                    humanFeedback = "Rejected by human.";
+                } else {
+                    isApproved = false;
+                    humanFeedback = `Rejected. Human feedback: "${input}"`;
+                }
+            }
+
+            if (!isApproved) {
+                console.log(`Command aborted.`);
+                payload.status = "blocked";
+                payload.message = "Command was blocked by human. Read feedback and adjust.";
+                payload.data = { risk: evaluation.risk, feedback: humanFeedback };
+                batchAborted = true;
+            } else {
+                try {
+                    const { stdout, stderr } = await executeCMD(args.command);
+                    console.log(`Execution complete.`);
+                    
+                    payload.status = "success";
+                    payload.message = "Command executed successfully.";
+                    payload.data = {
+                        risk: evaluation.risk,
+                        feedback: humanFeedback,
+                        stdout: truncateOutput(stdout),
+                        stderr: truncateOutput(stderr)
+                    };
+                } catch (err) {
+                    console.log(`Execution failed: ${err.message}`);
+                    
+                    payload.status = "error";
+                    payload.message = `Command failed to execute: ${err.message}`;
+                    payload.data = { risk: evaluation.risk, feedback: humanFeedback };
+                    batchAborted = true;
+                }
+            }
+        }
+
+        toolMessages.push({
+            role: "tool",
+            tool_call_id: toolCall.id,
+            name: toolName,
+            content: JSON.stringify(payload)
+        });
+    }
+
+    return { messages: toolMessages };
+};
+
+const shouldContinue = (state) => {
+    if (state.loopCount >= 10) {
+        console.log("\nCircuit Breaker Triggered.");
+        return END;
+    }
+    return state.messages[state.messages.length - 1].tool_calls?.length > 0 ? "execute_tools" : END;
+};
+
+export const agentApp = new StateGraph(AgentState)
+    .addNode("agent", agentNode)
+    .addNode("execute_tools", executeToolsNode)
+    .addEdge(START, "agent")
+    .addConditionalEdges("agent", shouldContinue, { "execute_tools": "execute_tools", [END]: END })
+    .addEdge("execute_tools", "agent")
+    .compile();
+</file>
+
+<file path="Architecture.md">
+=========================================================================
+             SECURE ReAct TERMINAL AGENT ARCHITECTURE (V2)
+=========================================================================
+
+ [ User Request ] ──────┐
+                        ▼
+ ┌───────────────────────────────────────────────────────────────┐
+ │                   MEMORY / CONTEXT WINDOW                    │
+ │  System Prompt + User Goal + Feedback + Outputs (TRUNCATED)   │◄───────┐
+ └───────────────────────────────────────────────────────────────┘        │
+        │                                                                 │
+        ▼ (Token-Safe Context)                                            │
+ ┌───────────────────────────────────────────────────────────────┐        │
+ │                          LLM ENGINE                           │        │
+ │                   (Groq / llama3-70b-8192)                    │        │
+ └───────────────────────────────────────────────────────────────┘        │
+        │                                                                 │
+        ├─────────────────────────────┐                                   │
+        │                             │                                   │
+ (No Tools Requested            (Tool Requested)                          │
+  OR LoopCount > MAX)                 │                                   │
+        │                             ▼                                   │
+        │               ┌──────────────────────────────┐                  │
+        ▼               │ TOOL DISPATCHER (Sequential) │                  │
+ ┌─────────────┐        │ *Breaks inner loop on error  │                  │
+ │ END SESSION │        │  to allow LLM to reassess    │                  │
+ │ (Print Msg) │        └──────────────────────────────┘                  │
+ └─────────────┘                │              │                          │
+                                │              │                          │
+            ┌───────────────────┘              └─────────────┐            │
+            ▼                                                ▼            │
+ ┌─────────────────────┐                         ┌───────────────────────┐│
+ │     search.js       │                         │      executeCMD       ││
+ │    (Web Search)     │                         └───────────────────────┘│
+ └─────────────────────┘                                     │            │
+            │                                                ▼            │
+            │                                    ┌───────────────────────┐│
+            │                                    │ commandRiskClassifier ││
+            │                                    │ (Intent-Based RBAC)   ││
+            │                                    └───────────────────────┘│
+            │                                                │            │
+            │                                           (Risk > Low?)     │
+            │                                           /           \     │
+            │                                       [YES]           [NO]  │
+            │                                         │               │   │
+            │                                         ▼               │   │
+            │                                ┌─────────────────┐      │   │
+            │                                │ Human-in-Loop   │      │   │
+            │                                │ (SSH Keepalive) │      │   │
+            │                                └─────────────────┘      │   │
+            │                                   │ (Approve/Deny)      │   │
+            │                                   ▼                     │   │
+            │                                ┌─────────────────┐      │   │
+            │                                │     ssh.js      │◄─────┘   │
+            │                                │ (Remote Server) │          │
+            │                                └─────────────────┘          │
+            │                                         │                   │
+            ▼                                         ▼                   │
+ ┌───────────────────────────────────────────────────────────────┐        │
+ │                 CONTEXT PAYLOAD GENERATOR                     │        │
+ │ * Packages Stdout/Stderr, Status, and Human Feedback          │        │
+ │ * ENFORCES 2000-TOKEN TRUNCATION TO PREVENT API OVERFLOW      │        │
+ └───────────────────────────────────────────────────────────────┘        │
+        │                                                                 │
+        └─────────────────────────────────────────────────────────────────┘
+                                 (Appends to Memory & Increments Loop)
+</file>
+
+<file path="constants.js">
+export const SYSTEM_PROMPT = 
+`SYSTEM INSTRUCTIONS:
+You are an AI Terminal Agent bound strictly to a remote Linux server via SSH. 
+Your SOLE purpose is to execute server administration tasks, diagnose issues, and run terminal commands.
+
+CRITICAL CONSTRAINTS:
+1. You MUST NOT answer general knowledge queries, chat casually, or write non-server code.
+2. If unrelated to server management, reject it immediately.
+3. You are a secure terminal interface, not a conversational AI.
+
+OPERATIONAL RULES:
+1. Execute commands one by one to verify outputs.
+2. If a command fails/is rejected, read human feedback and try an alternative.
+3. Summarize actions when successfully fulfilled.
+USER REQUEST:\n`;
+
+export const toolsSpec = [
+    {
+        type: "function",
+        function: {
+            name: "search",
+            description: "Search the web for up-to-date documentation, commands, or tech info.",
+            parameters: {
+                type: "object",
+                properties: {
+                    query: { type: "string" },
+                    searchDepth: { type: "string", enum: ["basic", "advanced"], default: "basic" }
+                },
+                required: ["query"]
+            }
+        }
+    },
+    {
+        type: "function",
+        function: {
+            name: "executeCMD",
+            description: "Executes a single bash command string on the remote Linux machine via SSH.",
+            parameters: {
+                type: "object",
+                properties: {
+                    command: { type: "string" }
+                },
+                required: ["command"]
+            }
+        }
+    }
+];
+</file>
+
+<file path="index.js">
+import {config} from 'dotenv';
+config();
+
+import { connect, disconnect } from "./tools/ssh.tool.js";
+import { askHuman } from "./utils.js";
+import { SYSTEM_PROMPT } from "./constants.js";
+import { agentApp } from "./agent.js";
+
+async function runInteractiveTerminalAgent(sshConfig) {
+    console.log("Initializing SSH Connection...");
+    try {
+        await connect(sshConfig.host, sshConfig.port, sshConfig.username, sshConfig.keyPath);
+        console.log("Connected to Remote Server.\n\n=========================================\nTerminal Agent Ready!\nType your command to begin, or 'exit'/'quit' to end.\n=========================================\n");
+    } catch (err) {
+        console.error("Failed to connect to server:", err.message);
+        return;
+    }
+
+    let chatHistory = [];
+    let isFirstMessage = true;
+
+    while (true) {
+        const userInput = await askHuman("You: ");
+        if (['exit', 'quit'].includes(userInput.toLowerCase())) break;
+        if (!userInput) continue;
+
+        const messageContent = isFirstMessage ? SYSTEM_PROMPT + userInput : userInput;
+        isFirstMessage = false;
+
+        chatHistory.push({ role: "user", content: messageContent });
+        console.log("Thinking...");
+
+        try {
+            chatHistory = (await agentApp.invoke({ messages: chatHistory, loopCount: 0 })).messages;
+            console.log(`\n=========================================\nAgent:\n${chatHistory[chatHistory.length - 1].content || "[Tool Executed / Internal Processing]"}\n=========================================\n`);
+        } catch (error) {
+            console.error("\nError during agent execution:", error);
+            chatHistory.pop();
+        }
+    }
+
+    console.log("\nCleaning up connections...");
+    await disconnect();
+    console.log("Agent session finished.");
+}
+
+
+
+// Execute the application
+runInteractiveTerminalAgent({
+    host:process.env.SSH_HOST,
+    port: process.env.SSH_PORT,
+    username: process.env.SSH_USERNAME,
+    keyPath: process.env.SSH_KEY_PATH
+});
+</file>
+
+<file path="llm.js">
+import OpenAI from "openai/index.js";
+import dotenv from "dotenv";
+
+dotenv.config();
+
+export const client = new OpenAI({
+    apiKey: process.env.GROQ_API_KEY,
+    baseURL: "https://api.groq.com/openai/v1"
+});
+</file>
+
+<file path="utils.js">
+import readline from "readline";
+
+export const askHuman = (query) => new Promise(resolve => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.question(query, answer => {
+        rl.close();
+        resolve(answer.trim());
+    });
+});
+
+export const truncateOutput = (str) => 
+    str.length > 2000 ? str.slice(0, 2000) + "\n...[TRUNCATED]" : str;
+</file>
+
+<file path=".gitignore">
+# Logs
+*.pem
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Diagnostic reports (https://nodejs.org/api/report.html)
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Directory for instrumented libs generated by jscoverage/JSCover
+lib-cov
+
+# Coverage directory used by tools like istanbul
+coverage
+*.lcov
+
+# nyc test coverage
+.nyc_output
+
+# Grunt intermediate storage (https://gruntjs.com/creating-plugins#storing-task-files)
+.grunt
+
+# Bower dependency directory (https://bower.io/)
+bower_components
+
+# node-waf configuration
+.lock-wscript
+
+# Compiled binary addons (https://nodejs.org/api/addons.html)
+build/Release
+
+# Dependency directories
+node_modules/
+jspm_packages/
+
+# Snowpack dependency directory (https://snowpack.dev/)
+web_modules/
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Optional stylelint cache
+.stylelintcache
+
+# Optional REPL history
+.node_repl_history
+
+# Output of 'npm pack'
+*.tgz
+
+# Yarn Integrity file
+.yarn-integrity
+
+# dotenv environment variable files
+.env
+.env.*
+!.env.example
+
+# parcel-bundler cache (https://parceljs.org/)
+.cache
+.parcel-cache
+
+# Next.js build output
+.next
+out
+
+# Nuxt.js build / generate output
+.nuxt
+dist
+.output
+
+# Gatsby files
+.cache/
+# Comment in the public line in if your project uses Gatsby and not Next.js
+# https://nextjs.org/blog/next-9-1#public-directory-support
+# public
+
+# vuepress build output
+.vuepress/dist
+
+# vuepress v2.x temp directory
+.temp
+
+# Sveltekit cache directory
+.svelte-kit/
+
+# vitepress build output
+**/.vitepress/dist
+
+# vitepress cache directory
+**/.vitepress/cache
+
+# Docusaurus cache and generated files
+.docusaurus
+
+# Serverless directories
+.serverless/
+
+# FuseBox cache
+.fusebox/
+
+# DynamoDB Local files
+.dynamodb/
+
+# Firebase cache directory
+.firebase/
+
+# TernJS port file
+.tern-port
+
+# Stores VSCode versions used for testing VSCode extensions
+.vscode-test
+
+# pnpm
+.pnpm-store
+
+# yarn v3
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+
+# Vite files
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+.vite/
+</file>
+
+</files>
