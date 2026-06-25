@@ -1,0 +1,28 @@
+{
+  "name": "opspilot",
+  "version": "1.0.0",
+  "description": "A secure AI-powered Linux operations agent built with LangGraph that performs reasoning, web search, SSH command execution, AI risk assessment, and human-in-the-loop authorization.",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "node ./index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Pratham2779/OpsPilot.git"
+  },
+  "author": "Prathamesh Arun Gurav",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Pratham2779/OpsPilot/issues"
+  },
+  "homepage": "https://github.com/Pratham2779/OpsPilot#readme",
+  "dependencies": {
+    "@langchain/core": "^1.2.1",
+    "@langchain/langgraph": "^1.4.6",
+    "@tavily/core": "^0.7.6",
+    "dotenv": "^17.4.2",
+    "openai": "^6.45.0",
+    "ssh2": "^1.17.0"
+  }
+}
